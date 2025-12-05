@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "655242859350",
+    "project_id": "gestaofinanceira-9530a",
+    "storage_bucket": "gestaofinanceira-9530a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:655242859350:android:2563d40d1a9142b823fcf7",
+        "android_client_info": {
+          "package_name": "com.example.GestaoFinanceira"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAtNT_peev3MuYoUbls6iF1CLiBH3nOoLU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

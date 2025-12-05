@@ -1,6 +1,7 @@
-package com.example.GestaoFinanceira // Mudei o nome do pacote
+package com.example.GestaoFinanceira
 
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -21,42 +22,50 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.GestaoFinanceira.ui.theme.AulaTelasTheme // Ajuste o import se o nome do tema for diferente
+import com.example.GestaoFinanceira.ui.theme.AulaTelasTheme
+
+// IMPORTAÇÕES DO FIREBASE E DATA
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseError
+import com.google.firebase.database.ValueEventListener
+import com.google.firebase.database.ktx.database
+import com.google.firebase.ktx.Firebase
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
 // =======================================================
-// CONSTANTES E DATAS
+// CONFIGURAÇÕES E CORES
 // =======================================================
 
 object AppColors {
-    val Primary = Color(0xFF1976D2) // Azul Sólido
-    val Secondary = Color(0xFF616161) // Cinza Escuro
+    val Primary = Color(0xFF1976D2)
+    val Secondary = Color(0xFF616161)
     val Background = Color(0xFFF5F5F5)
     val Surface = Color.White
     val Text = Color(0xFF212121)
-    val Income = Color(0xFF388E3C)   // Verde para receitas
-    val Expense = Color(0xFFD32F2F)  // Vermelho para despesas
+    val Income = Color(0xFF388E3C)
+    val Expense = Color(0xFFD32F2F)
 }
 
 enum class TransactionType { RECEITA, DESPESA }
 
+// Modelo de dados (com valores padrão para o Firebase)
 data class Transaction(
-    val id: Int,
-    val description: String,
-    val value: Double,
-    val type: TransactionType,
-    val date: String, // Simplificado para String por enquanto
-    val category: String
+    val id: String = "",
+    val description: String = "",
+    val value: Double = 0.0,
+    val type: TransactionType = TransactionType.DESPESA,
+    val date: String = "",
+    val category: String = ""
 )
-
-// =======================================================
-// ESTRUTURA DE NAVEGAÇÃO
-// =======================================================
 
 class BottomAppBarItem(val icon: ImageVector, val label: String)
 class TopAppBarItem(var title: String)
@@ -84,7 +93,7 @@ sealed class ScreenItem(
 val mainScreens = listOf(ScreenItem.Dashboard, ScreenItem.Transactions, ScreenItem.Settings)
 
 // =======================================================
-// MAIN ACTIVITY E TEMA
+// MAIN ACTIVITY
 // =======================================================
 
 class MainActivity : ComponentActivity() {
@@ -92,9 +101,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            AulaTelasTheme { // Use o nome do seu tema
+            AulaTelasTheme {
                 MinimalTheme {
-                    App()
+                    AuthWrapper()
                 }
             }
         }
@@ -137,60 +146,230 @@ fun MinimalTheme(content: @Composable () -> Unit) {
 }
 
 // =======================================================
-// FUNÇÃO PRINCIPAL DO APP E NAVEGAÇÃO
+// CONTROLE DE AUTENTICAÇÃO (WRAPPER)
+// =======================================================
+
+@Composable
+fun AuthWrapper() {
+    val auth = FirebaseAuth.getInstance()
+    // Observa se existe usuário logado
+    var currentUser by remember { mutableStateOf(auth.currentUser) }
+
+    DisposableEffect(Unit) {
+        val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
+            currentUser = firebaseAuth.currentUser
+        }
+        auth.addAuthStateListener(listener)
+        onDispose {
+            auth.removeAuthStateListener(listener)
+        }
+    }
+
+    if (currentUser != null) {
+        // Usuário logado: Mostra o App
+        App(
+            userId = currentUser!!.uid,
+            onLogout = { auth.signOut() }
+        )
+    } else {
+        // Usuário deslogado: Mostra Login/Cadastro
+        LoginScreen(
+            onLoginSuccess = { /* O listener acima cuidará da navegação */ }
+        )
+    }
+}
+
+@Composable
+fun LoginScreen(onLoginSuccess: () -> Unit) {
+    val context = LocalContext.current
+    val auth = FirebaseAuth.getInstance()
+
+    // Estados do formulário
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var isLoginMode by remember { mutableStateOf(true) } // true = Login, false = Cadastro
+    var isLoading by remember { mutableStateOf(false) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(AppColors.Primary),
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            modifier = Modifier
+                .padding(32.dp)
+                .fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White)
+        ) {
+            Column(
+                modifier = Modifier.padding(32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Lock,
+                    contentDescription = null,
+                    tint = AppColors.Primary,
+                    modifier = Modifier.size(48.dp)
+                )
+
+                Text(
+                    text = if (isLoginMode) "Bem-vindo de volta" else "Crie sua conta",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = AppColors.Text,
+                    textAlign = TextAlign.Center
+                )
+
+                OutlinedTextField(
+                    value = email,
+                    onValueChange = { email = it },
+                    label = { Text("Email") },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                    singleLine = true
+                )
+
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("Senha") },
+                    modifier = Modifier.fillMaxWidth(),
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    singleLine = true
+                )
+
+                if (isLoading) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp), color = AppColors.Primary)
+                } else {
+                    Button(
+                        onClick = {
+                            if (email.isBlank() || password.isBlank()) {
+                                Toast.makeText(context, "Preencha todos os campos", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+
+                            isLoading = true
+                            if (isLoginMode) {
+                                // LOGIN
+                                auth.signInWithEmailAndPassword(email, password)
+                                    .addOnCompleteListener { task ->
+                                        isLoading = false
+                                        if (task.isSuccessful) {
+                                            onLoginSuccess()
+                                        } else {
+                                            Toast.makeText(context, "Erro: ${task.exception?.message}", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                            } else {
+                                // CADASTRO
+                                auth.createUserWithEmailAndPassword(email, password)
+                                    .addOnCompleteListener { task ->
+                                        isLoading = false
+                                        if (task.isSuccessful) {
+                                            onLoginSuccess()
+                                        } else {
+                                            Toast.makeText(context, "Erro ao criar conta: ${task.exception?.message}", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = AppColors.Primary)
+                    ) {
+                        Text(if (isLoginMode) "ENTRAR" else "CADASTRAR")
+                    }
+                }
+
+                TextButton(onClick = { isLoginMode = !isLoginMode }) {
+                    Text(
+                        text = if (isLoginMode) "Não tem conta? Cadastre-se" else "Já tem conta? Faça login",
+                        color = AppColors.Secondary
+                    )
+                }
+            }
+        }
+    }
+}
+
+// =======================================================
+// APP PRINCIPAL (DASHBOARD, ETC)
 // =======================================================
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun App() {
-    // Estado para a tela atual selecionada na BottomBar
+fun App(userId: String, onLogout: () -> Unit) {
     var currentScreen: ScreenItem by remember { mutableStateOf(ScreenItem.Dashboard) }
-
-    // Estado para controlar a abertura da tela de adição
     var showAddTransactionSheet by remember { mutableStateOf(false) }
 
-    // Lista de transações (dados de exemplo)
-    var transactions by remember {
-        mutableStateOf(listOf(
-            Transaction(1, "Salário de Setembro", 4500.0, TransactionType.RECEITA, "05/10/2025", "Salário"),
-            Transaction(2, "Aluguel", 1200.0, TransactionType.DESPESA, "06/10/2025", "Moradia"),
-            Transaction(3, "Supermercado", 650.0, TransactionType.DESPESA, "07/10/2025", "Alimentação"),
-            Transaction(4, "Freelance Website", 950.0, TransactionType.RECEITA, "08/10/2025", "Renda Extra"),
-            Transaction(5, "Conta de Luz", 180.0, TransactionType.DESPESA, "09/10/2025", "Contas"),
-        ))
+    // Lista de transações
+    var transactions by remember { mutableStateOf(listOf<Transaction>()) }
+    var isLoadingData by remember { mutableStateOf(true) }
+
+    // Referência ao Firebase Database
+    val database = Firebase.database
+    val myRef = database.getReference("users").child(userId).child("transactions")
+
+    // Carregamento Otimizado
+    DisposableEffect(Unit) {
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val items = mutableListOf<Transaction>()
+                for (child in snapshot.children) {
+                    val transaction = child.getValue(Transaction::class.java)
+                    if (transaction != null) {
+                        items.add(transaction)
+                    }
+                }
+                // OTIMIZAÇÃO: Inverte a lista aqui (uma única vez)
+                transactions = items.reversed()
+                isLoadingData = false
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                isLoadingData = false
+            }
+        }
+        myRef.addValueEventListener(listener)
+        onDispose {
+            myRef.removeEventListener(listener)
+        }
     }
 
     val pagerState = rememberPagerState { mainScreens.size }
 
-    // Função para adicionar uma nova transação
-    val addTransaction: (Transaction) -> Unit = { transaction ->
-        transactions = transactions + transaction
-    }
-
-    // Efeito para sincronizar a seleção da BottomBar com o Pager
     LaunchedEffect(currentScreen) {
         val targetIndex = mainScreens.indexOf(currentScreen)
-        if (targetIndex != -1) {
-            pagerState.animateScrollToPage(targetIndex)
-        }
+        if (targetIndex != -1) pagerState.animateScrollToPage(targetIndex)
     }
-
-    // Efeito para sincronizar o Pager com a seleção da BottomBar
     LaunchedEffect(pagerState.currentPage, pagerState.isScrollInProgress) {
         if (!pagerState.isScrollInProgress) {
             currentScreen = mainScreens[pagerState.currentPage]
         }
     }
 
-    // Tela para adicionar transação (Modal)
+    // Modal de Adição
     if (showAddTransactionSheet) {
         ModalBottomSheet(onDismissRequest = { showAddTransactionSheet = false }) {
             AddTransactionScreen(
                 onAddTransaction = { description, value, type, category ->
-                    val newId = (transactions.maxOfOrNull { it.id } ?: 0) + 1
-                    val newTransaction = Transaction(newId, description, value, type, "10/10/2025", category) // Data fixa
-                    addTransaction(newTransaction)
-                    showAddTransactionSheet = false // Fecha o modal
+                    val key = myRef.push().key ?: return@AddTransactionScreen
+                    // Data automática (Requer MinSdk 26)
+                    val currentDate = LocalDate.now().format(DateTimeFormatter.ofPattern("dd/MM/yyyy"))
+
+                    val newTransaction = Transaction(
+                        id = key,
+                        description = description,
+                        value = value,
+                        type = type,
+                        date = currentDate,
+                        category = category
+                    )
+                    myRef.child(key).setValue(newTransaction)
+                    showAddTransactionSheet = false
                 }
             )
         }
@@ -200,7 +379,12 @@ fun App() {
         topBar = {
             TopAppBar(
                 title = { Text(currentScreen.topAppBarItem.title, color = Color.White) },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = AppColors.Primary)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = AppColors.Primary),
+                actions = {
+                    IconButton(onClick = onLogout) {
+                        Icon(Icons.Default.ExitToApp, contentDescription = "Sair", tint = Color.White)
+                    }
+                }
             )
         },
         bottomBar = {
@@ -228,36 +412,48 @@ fun App() {
                 containerColor = AppColors.Primary,
                 contentColor = Color.White
             ) {
-                Icon(Icons.Default.Add, contentDescription = "Adicionar Transação")
+                Icon(Icons.Default.Add, contentDescription = "Adicionar")
             }
         }
     ) { innerPadding ->
-        HorizontalPager(pagerState, Modifier.padding(innerPadding)) { page ->
-            when (mainScreens[page]) {
-                ScreenItem.Dashboard -> DashboardScreen(transactions)
-                ScreenItem.Transactions -> TransactionsScreen(transactions)
-                ScreenItem.Settings -> SettingsScreen()
+        if (isLoadingData) {
+            Box(Modifier.fillMaxSize().padding(innerPadding), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = AppColors.Primary)
+            }
+        } else {
+            HorizontalPager(pagerState, Modifier.padding(innerPadding)) { page ->
+                when (mainScreens[page]) {
+                    ScreenItem.Dashboard -> DashboardScreen(transactions)
+                    ScreenItem.Transactions -> TransactionsScreen(transactions)
+                    ScreenItem.Settings -> SettingsScreen()
+                }
             }
         }
     }
 }
 
 // =======================================================
-// TELAS E COMPONENTES
+// TELAS INTERNAS OTIMIZADAS
 // =======================================================
 
 @Composable
 fun DashboardScreen(transactions: List<Transaction>) {
-    val totalIncome = transactions.filter { it.type == TransactionType.RECEITA }.sumOf { it.value }
-    val totalExpense = transactions.filter { it.type == TransactionType.DESPESA }.sumOf { it.value }
-    val balance = totalIncome - totalExpense
+    // OTIMIZAÇÃO: remember evita recálculos desnecessários na UI
+    val totalIncome = remember(transactions) {
+        transactions.filter { it.type == TransactionType.RECEITA }.sumOf { it.value }
+    }
+    val totalExpense = remember(transactions) {
+        transactions.filter { it.type == TransactionType.DESPESA }.sumOf { it.value }
+    }
+    val balance = remember(totalIncome, totalExpense) {
+        totalIncome - totalExpense
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().background(AppColors.Background).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
-            // Card do Balanço Geral
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 elevation = CardDefaults.cardElevation(4.dp),
@@ -280,7 +476,6 @@ fun DashboardScreen(transactions: List<Transaction>) {
         }
 
         item {
-            // Cards de Receita e Despesa
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 SummaryCard("Receitas", totalIncome, AppColors.Income, Modifier.weight(1f))
                 SummaryCard("Despesas", totalExpense, AppColors.Expense, Modifier.weight(1f))
@@ -295,8 +490,8 @@ fun DashboardScreen(transactions: List<Transaction>) {
             )
         }
 
-        // Lista das últimas 5 transações
-        items(transactions.takeLast(5).reversed()) { transaction ->
+        // A lista já está invertida (do mais novo pro mais antigo), pegamos apenas 5
+        items(transactions.take(5)) { transaction ->
             TransactionItemCard(transaction)
         }
     }
@@ -321,7 +516,6 @@ fun SummaryCard(title: String, value: Double, color: Color, modifier: Modifier =
     }
 }
 
-
 @Composable
 fun TransactionsScreen(transactions: List<Transaction>) {
     if (transactions.isEmpty()) {
@@ -342,7 +536,8 @@ fun TransactionsScreen(transactions: List<Transaction>) {
                     modifier = Modifier.padding(bottom = 8.dp)
                 )
             }
-            items(transactions.reversed(), key = { it.id }) { transaction ->
+            // Usa lista já invertida no listener
+            items(transactions, key = { it.id }) { transaction ->
                 TransactionItemCard(transaction)
             }
         }
@@ -392,7 +587,6 @@ fun AddTransactionScreen(
     ) {
         Text("Adicionar Transação", style = MaterialTheme.typography.headlineSmall)
 
-        // Seleção de Tipo (Receita/Despesa)
         SegmentedButtonRow(selectedType, onTypeChange = { selectedType = it })
 
         OutlinedTextField(
@@ -477,14 +671,8 @@ fun SettingsScreen() {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Default.Settings, contentDescription = null, tint = AppColors.Secondary, modifier = Modifier.size(80.dp))
             Spacer(Modifier.height(16.dp))
-            Text("Tela de Configurações", fontSize = 22.sp, color = AppColors.Text)
-            Text("Funcionalidades como tema, moeda, etc. apareceriam aqui.", color = AppColors.Secondary, textAlign = TextAlign.Center)
+            Text("Configurações", fontSize = 22.sp, color = AppColors.Text)
+            Text("Você está logado com email e senha.", color = AppColors.Secondary, textAlign = TextAlign.Center)
         }
     }
-}
-
-@Preview(showBackground = true)
-@Composable
-fun PreviewApp() {
-    MinimalTheme { App() }
 }

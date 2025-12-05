@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    id("com.google.gms.google-services")
 }
 
 android {
@@ -9,8 +10,8 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.example.aulatelas"
-        minSdk = 24
+        applicationId = "com.example.GestaoFinanceira"
+        minSdk = 26
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
@@ -59,4 +60,14 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
     debugImplementation(libs.androidx.material.icons.exetended)
+    implementation("androidx.compose.material:material-icons-extended:1.7.5")
+
+    // --- ADICIONE ESTAS DEPENDÊNCIAS DO FIREBASE AQUI ---
+    // O BOM controla as versões (garante que tudo seja compatível)
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+
+    // Bibliotecas específicas (sem número de versão, pois o BOM gerencia)
+    implementation("com.google.firebase:firebase-auth")
+    implementation("com.google.firebase:firebase-database")
+    implementation("com.google.firebase:firebase-analytics")
 }
